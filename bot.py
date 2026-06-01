@@ -10,9 +10,10 @@ load_dotenv()
 TOKEN          = os.getenv("DISCORD_TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 DEVICE_ID      = os.getenv("TUYA_DEVICE_ID")
-DEVICE_IP      = os.getenv("TUYA_DEVICE_IP")
 LOCAL_KEY      = os.getenv("TUYA_LOCAL_KEY")
-DEVICE_VERSION = os.getenv("TUYA_VERSION", "3.3")
+REGION         = os.getenv("TUYA_REGION", "eu")       # us / eu / cn / in
+ACCESS_ID      = os.getenv("TUYA_ACCESS_ID")
+ACCESS_SECRET  = os.getenv("TUYA_ACCESS_SECRET")
 
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -20,18 +21,21 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# ── Light helpers ─────────────────────────────────────────────────────────────
+# ── Light helpers (Tuya Cloud — works from Railway) ───────────────────────────
+
+def _get_cloud():
+    return tinytuya.Cloud(
+        apiRegion=REGION,
+        apiKey=ACCESS_ID,
+        apiSecret=ACCESS_SECRET,
+        apiDeviceID=DEVICE_ID,
+    )
+
 
 def _light_on():
     try:
-        d = tinytuya.BulbDevice(
-            dev_id=DEVICE_ID,
-            address=DEVICE_IP,
-            local_key=LOCAL_KEY,
-            version=float(DEVICE_VERSION),
-        )
-        d.set_socketTimeout(5)
-        d.turn_on()
+        cloud = _get_cloud()
+        cloud.sendcommand(DEVICE_ID, [{"code": "switch_led", "value": True}])
         print("💡 Light ON")
     except Exception as e:
         print(f"⚠️  Light ON failed: {e}")
@@ -39,14 +43,8 @@ def _light_on():
 
 def _light_off():
     try:
-        d = tinytuya.BulbDevice(
-            dev_id=DEVICE_ID,
-            address=DEVICE_IP,
-            local_key=LOCAL_KEY,
-            version=float(DEVICE_VERSION),
-        )
-        d.set_socketTimeout(5)
-        d.turn_off()
+        cloud = _get_cloud()
+        cloud.sendcommand(DEVICE_ID, [{"code": "switch_led", "value": False}])
         print("🌑 Light OFF")
     except Exception as e:
         print(f"⚠️  Light OFF failed: {e}")
@@ -87,8 +85,8 @@ async def on_voice_state_update(member, before, after):
     if log_channel is None:
         return
 
-    joined   = before.channel is None and after.channel is not None
-    left     = before.channel is not None and after.channel is None
+    joined = before.channel is None and after.channel is not None
+    left   = before.channel is not None and after.channel is None
     switched = (
         before.channel is not None
         and after.channel is not None
@@ -105,7 +103,6 @@ async def on_voice_state_update(member, before, after):
         await log_channel.send(
             f"👋 Bye **{member.display_name}** left **{before.channel.name}**!"
         )
-        # Turn light off only when voice channel is completely empty
         if not anyone_in_voice():
             await light_off()
             await log_channel.send("💡 No one left in voice — light turned off.")
