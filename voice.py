@@ -63,7 +63,7 @@ def _record_leave(member) -> float:
 
 def setup(bot, log_channel_id: int):
 
-    @tasks.loop(time=__import__("datetime").time(hour=23, minute=59))
+    @tasks.loop(time=__import__("datetime").time(hour=18, minute=15))
     async def post_daily_summary():
         log_channel = bot.get_channel(log_channel_id)
         if log_channel is None:
