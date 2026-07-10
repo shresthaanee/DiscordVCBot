@@ -7,77 +7,160 @@ def check_auth(request, secret):
     return request.headers.get("X-Secret") == secret
 
 
+def parse_user_id(data):
+    try:
+        return int(data.get("user_id", 0))
+    except (ValueError, TypeError):
+        return 0
+
+
+def get_member_status(bot, user_id: int):
+    """Return member and their current voice status."""
+    for guild in bot.guilds:
+        for vc in guild.voice_channels:
+            for member in vc.members:
+                if member.id == user_id:
+                    vs = member.voice
+                    return member, {
+                        "name":        member.display_name,
+                        "user_id":     str(member.id),
+                        "channel":     vc.name,
+                        "muted":       vs.mute,
+                        "deafened":    vs.deaf,
+                        "self_muted":  vs.self_mute,
+                        "self_muted":  vs.self_mute,
+                        "camera_on":   vs.self_video,
+                        "in_voice":    True,
+                    }
+    return None, {"in_voice": False}
+
+
 def setup(bot, secret: str, port: int):
 
-    async def handle_mute(request):
+    # ── Status ────────────────────────────────────────────────────────────────
+
+    async def handle_status(request):
+        """GET /status?user_id=123  — returns voice status of a user."""
         if not check_auth(request, secret):
             return web.Response(status=401, text="Unauthorized")
-        data    = await request.json()
-        user_id = int(data.get("user_id", 0))
-        mute    = data.get("mute", True)
-
-        # Debug — print all voice members the bot can currently see
-        for guild in bot.guilds:
-            for vc in guild.voice_channels:
-                ids = [m.id for m in vc.members]
-                print(f"🔍 {vc.name}: {ids}")
-        print(f"🔍 Looking for user_id: {user_id}")
-
-        member  = find_member_in_voice(bot, user_id)
-        if member is None:
-            return web.Response(status=404, text="User not in voice")
-        await member.edit(mute=mute)
-        action = "muted" if mute else "unmuted"
-        print(f"🔇 {member.display_name} {action} via widget")
-        return web.Response(text=f"{member.display_name} {action}")
-
-    async def handle_deafen(request):
-        if not check_auth(request, secret):
-            return web.Response(status=401, text="Unauthorized")
-        data    = await request.json()
-        user_id = int(data.get("user_id", 0))
-        deafen  = data.get("deafen", True)
-        member  = find_member_in_voice(bot, user_id)
-        if member is None:
-            return web.Response(status=404, text="User not in voice")
-        await member.edit(deafen=deafen)
-        action = "deafened" if deafen else "undeafened"
-        print(f"🔕 {member.display_name} {action} via widget")
-        return web.Response(text=f"{member.display_name} {action}")
-
-    async def handle_light(request):
-        if not check_auth(request, secret):
-            return web.Response(status=401, text="Unauthorized")
-        data   = await request.json()
-        action = data.get("action", "on")
-        if action == "on":
-            await light_on()
-        else:
-            await light_off()
-        return web.Response(text=f"Light {action}")
+        try:
+            user_id = int(request.rel_url.query.get("user_id", 0))
+        except ValueError:
+            return web.Response(status=400, text="Invalid user_id")
+        if user_id == 0:
+            return web.Response(status=400, text="Missing user_id")
+        _, status = get_member_status(bot, user_id)
+        return web.json_response(status)
 
     async def handle_vcwho(request):
+        """GET /vcwho — returns all users in voice with their status."""
         if not check_auth(request, secret):
             return web.Response(status=401, text="Unauthorized")
         result = {}
         for guild in bot.guilds:
             for vc in guild.voice_channels:
-                members = [
-                    {"name": m.display_name, "user_id": str(m.id)}
-                    for m in vc.members if not m.bot
-                ]
+                members = []
+                for m in vc.members:
+                    if m.bot:
+                        continue
+                    vs = m.voice
+                    members.append({
+                        "name":       m.display_name,
+                        "user_id":    str(m.id),
+                        "muted":      vs.mute,
+                        "deafened":   vs.deaf,
+                        "camera_on":  vs.self_video,
+                    })
                 if members:
                     result[vc.name] = members
         if not result:
-            return web.Response(text="Nobody in voice")
-        return web.json_response(result)
+            return web.json_response({"channels": {}, "total": 0})
+        return web.json_response({"channels": result, "total": sum(len(v) for v in result.values())})
+
+    # ── Mute (set or toggle) ──────────────────────────────────────────────────
+
+    async def handle_mute(request):
+        """POST /mute  body: {user_id, mute: true/false} or {user_id, toggle: true}"""
+        if not check_auth(request, secret):
+            return web.Response(status=401, text="Unauthorized")
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON body")
+
+        user_id = parse_user_id(data)
+        if user_id == 0:
+            return web.Response(status=400, text="Missing or invalid user_id")
+
+        member, status = get_member_status(bot, user_id)
+        if member is None:
+            return web.Response(status=404, text="User not in voice")
+
+        if data.get("toggle"):
+            mute = not status["muted"]
+        else:
+            mute = data.get("mute", True)
+
+        await member.edit(mute=mute)
+        action = "muted" if mute else "unmuted"
+        print(f"🔇 {member.display_name} {action} via widget")
+        return web.json_response({"user": member.display_name, "muted": mute})
+
+    # ── Deafen (set or toggle) ────────────────────────────────────────────────
+
+    async def handle_deafen(request):
+        """POST /deafen  body: {user_id, deafen: true/false} or {user_id, toggle: true}"""
+        if not check_auth(request, secret):
+            return web.Response(status=401, text="Unauthorized")
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON body")
+
+        user_id = parse_user_id(data)
+        if user_id == 0:
+            return web.Response(status=400, text="Missing or invalid user_id")
+
+        member, status = get_member_status(bot, user_id)
+        if member is None:
+            return web.Response(status=404, text="User not in voice")
+
+        if data.get("toggle"):
+            deafen = not status["deafened"]
+        else:
+            deafen = data.get("deafen", True)
+
+        await member.edit(deafen=deafen)
+        action = "deafened" if deafen else "undeafened"
+        print(f"🔕 {member.display_name} {action} via widget")
+        return web.json_response({"user": member.display_name, "deafened": deafen})
+
+    # ── Light ─────────────────────────────────────────────────────────────────
+
+    async def handle_light(request):
+        """POST /light  body: {action: "on"/"off"}"""
+        if not check_auth(request, secret):
+            return web.Response(status=401, text="Unauthorized")
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON body")
+        action = data.get("action", "on")
+        if action == "on":
+            await light_on()
+        else:
+            await light_off()
+        return web.json_response({"light": action})
+
+    # ── Server ────────────────────────────────────────────────────────────────
 
     async def start():
         app = web.Application()
+        app.router.add_get("/status", handle_status)
+        app.router.add_get("/vcwho",  handle_vcwho)
         app.router.add_post("/mute",   handle_mute)
         app.router.add_post("/deafen", handle_deafen)
         app.router.add_post("/light",  handle_light)
-        app.router.add_get("/vcwho",   handle_vcwho)
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", port).start()
