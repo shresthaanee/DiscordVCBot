@@ -198,6 +198,30 @@ def setup(bot, secret: str, port: int):
         print(f"⚡ /nugahlive/action → {result}")
         return web.json_response(result)
 
+    # ── Disconnect ───────────────────────────────────────────────────────────
+
+    async def handle_disconnect(request):
+        """POST /nugahlive/disconnect  body: {user_id}"""
+        if not check_auth(request, secret):
+            return web.Response(status=401, text="Unauthorized")
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON body")
+
+        user_id = parse_user_id(data)
+        if user_id == 0:
+            return web.Response(status=400, text="Missing or invalid user_id")
+
+        member, status = get_member_status(bot, user_id)
+        if member is None:
+            return web.Response(status=404, text="User not in voice")
+
+        channel = status["channel"]
+        await member.move_to(None)
+        print(f"👢 {member.display_name} disconnected from {channel} via widget")
+        return web.json_response({"user": member.display_name, "disconnected_from": channel})
+
     # ── Light ─────────────────────────────────────────────────────────────────
 
     async def handle_light(request):
@@ -223,7 +247,8 @@ def setup(bot, secret: str, port: int):
         app.router.add_get("/vcwho",  handle_vcwho)
         app.router.add_post("/mute",                handle_mute)
         app.router.add_post("/deafen",              handle_deafen)
-        app.router.add_post("/nugahlive/action",    handle_nugahlive_action)
+        app.router.add_post("/nugahlive/action",        handle_nugahlive_action)
+        app.router.add_post("/nugahlive/disconnect",    handle_disconnect)
         app.router.add_post("/light",               handle_light)
         runner = web.AppRunner(app)
         await runner.setup()
