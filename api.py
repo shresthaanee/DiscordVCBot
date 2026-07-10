@@ -135,6 +135,69 @@ def setup(bot, secret: str, port: int):
         print(f"🔕 {member.display_name} {action} via widget")
         return web.json_response({"user": member.display_name, "deafened": deafen})
 
+    # ── Combined action endpoint ──────────────────────────────────────────────
+
+    async def handle_nugahlive_action(request):
+        """
+        POST /nugahlive/action
+        Body (all fields optional — only include what you want to change):
+        {
+            "user_id": "618...",
+
+            "mute":         true/false,   # explicit mute/unmute
+            "mute_toggle":  true,         # flip current mute state
+
+            "deafen":       true/false,   # explicit deafen/undeafen
+            "deafen_toggle": true         # flip current deafen state
+        }
+        You can combine any of these in one call.
+        """
+        if not check_auth(request, secret):
+            return web.Response(status=401, text="Unauthorized")
+        try:
+            data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="Invalid JSON body")
+
+        user_id = parse_user_id(data)
+        if user_id == 0:
+            return web.Response(status=400, text="Missing or invalid user_id")
+
+        member, status = get_member_status(bot, user_id)
+        if member is None:
+            return web.Response(status=404, text="User not in voice")
+
+        result = {"user": member.display_name}
+
+        # Resolve mute
+        new_mute = None
+        if data.get("mute_toggle"):
+            new_mute = not status["muted"]
+        elif "mute" in data:
+            new_mute = bool(data["mute"])
+
+        # Resolve deafen
+        new_deafen = None
+        if data.get("deafen_toggle"):
+            new_deafen = not status["deafened"]
+        elif "deafen" in data:
+            new_deafen = bool(data["deafen"])
+
+        if new_mute is None and new_deafen is None:
+            return web.Response(status=400, text="No action specified. Use mute, mute_toggle, deafen, or deafen_toggle.")
+
+        # Apply — build kwargs so we only send what changed
+        kwargs = {}
+        if new_mute   is not None: kwargs["mute"]   = new_mute
+        if new_deafen is not None: kwargs["deafen"]  = new_deafen
+        await member.edit(**kwargs)
+
+        if new_mute   is not None: result["muted"]   = new_mute
+        if new_deafen is not None: result["deafened"] = new_deafen
+
+        print(f"⚡ /nugahlive/action → {result}")
+        return web.json_response(result)
+
     # ── Light ─────────────────────────────────────────────────────────────────
 
     async def handle_light(request):
@@ -158,9 +221,10 @@ def setup(bot, secret: str, port: int):
         app = web.Application()
         app.router.add_get("/status", handle_status)
         app.router.add_get("/vcwho",  handle_vcwho)
-        app.router.add_post("/mute",   handle_mute)
-        app.router.add_post("/deafen", handle_deafen)
-        app.router.add_post("/light",  handle_light)
+        app.router.add_post("/mute",                handle_mute)
+        app.router.add_post("/deafen",              handle_deafen)
+        app.router.add_post("/nugahlive/action",    handle_nugahlive_action)
+        app.router.add_post("/light",               handle_light)
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", port).start()
