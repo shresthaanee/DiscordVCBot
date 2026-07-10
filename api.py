@@ -1,6 +1,6 @@
 from aiohttp import web
 from light import light_on, light_off
-from voice import find_member_in_voice
+from voice import find_member_in_voice, get_session_duration, format_duration
 
 
 def check_auth(request, secret):
@@ -21,16 +21,17 @@ def get_member_status(bot, user_id: int):
             for member in vc.members:
                 if member.id == user_id:
                     vs = member.voice
+                    secs = get_session_duration(member.id)
                     return member, {
-                        "name":        member.display_name,
-                        "user_id":     str(member.id),
-                        "channel":     vc.name,
-                        "muted":       vs.mute,
-                        "deafened":    vs.deaf,
-                        "self_muted":  vs.self_mute,
-                        "self_muted":  vs.self_mute,
-                        "camera_on":   vs.self_video,
-                        "in_voice":    True,
+                        "name":             member.display_name,
+                        "user_id":          str(member.id),
+                        "channel":          vc.name,
+                        "muted":            vs.mute,
+                        "deafened":         vs.deaf,
+                        "self_muted":       vs.self_mute,
+                        "camera_on":        vs.self_video,
+                        "session_duration": format_duration(secs) if secs else "unknown",
+                        "in_voice":         True,
                     }
     return None, {"in_voice": False}
 
@@ -63,13 +64,15 @@ def setup(bot, secret: str, port: int):
                 for m in vc.members:
                     if m.bot:
                         continue
-                    vs = m.voice
+                    vs   = m.voice
+                    secs = get_session_duration(m.id)
                     members.append({
-                        "name":       m.display_name,
-                        "user_id":    str(m.id),
-                        "muted":      vs.mute,
-                        "deafened":   vs.deaf,
-                        "camera_on":  vs.self_video,
+                        "name":             m.display_name,
+                        "user_id":          str(m.id),
+                        "muted":            vs.mute,
+                        "deafened":         vs.deaf,
+                        "camera_on":        vs.self_video,
+                        "session_duration": format_duration(secs) if secs else "unknown",
                     })
                 if members:
                     result[vc.name] = members
