@@ -15,6 +15,14 @@ def setup(bot, secret: str, port: int):
         data    = await request.json()
         user_id = int(data.get("user_id", 0))
         mute    = data.get("mute", True)
+
+        # Debug — print all voice members the bot can currently see
+        for guild in bot.guilds:
+            for vc in guild.voice_channels:
+                ids = [m.id for m in vc.members]
+                print(f"🔍 {vc.name}: {ids}")
+        print(f"🔍 Looking for user_id: {user_id}")
+
         member  = find_member_in_voice(bot, user_id)
         if member is None:
             return web.Response(status=404, text="User not in voice")
@@ -51,14 +59,18 @@ def setup(bot, secret: str, port: int):
     async def handle_vcwho(request):
         if not check_auth(request, secret):
             return web.Response(status=401, text="Unauthorized")
-        result = []
+        result = {}
         for guild in bot.guilds:
             for vc in guild.voice_channels:
-                members = [m.display_name for m in vc.members if not m.bot]
+                members = [
+                    {"name": m.display_name, "user_id": str(m.id)}
+                    for m in vc.members if not m.bot
+                ]
                 if members:
-                    result.append(f"{vc.name}: {', '.join(members)}")
-        text = "\n".join(result) if result else "Nobody in voice"
-        return web.Response(text=text)
+                    result[vc.name] = members
+        if not result:
+            return web.Response(text="Nobody in voice")
+        return web.json_response(result)
 
     async def start():
         app = web.Application()

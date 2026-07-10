@@ -14,6 +14,8 @@ PORT           = int(os.getenv("PORT", 8080))
 
 intents = discord.Intents.default()
 intents.voice_states = True
+intents.members = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
