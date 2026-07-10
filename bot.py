@@ -92,6 +92,20 @@ async def handle_mute(request):
     print(f"🔇 {member.display_name} {action} via widget")
     return web.Response(text=f"{member.display_name} {action}")
 
+async def handle_deafen(request):
+    if not check_auth(request):
+        return web.Response(status=401, text="Unauthorized")
+    data    = await request.json()
+    user_id = int(data.get("user_id", 0))
+    deafen  = data.get("deafen", True)        # true = deafen, false = undeafen
+    member  = find_member_in_voice(user_id)
+    if member is None:
+        return web.Response(status=404, text="User not in voice")
+    await member.edit(deafen=deafen)
+    action = "deafened" if deafen else "undeafened"
+    print(f"🔕 {member.display_name} {action} via widget")
+    return web.Response(text=f"{member.display_name} {action}")
+
 async def handle_light(request):
     if not check_auth(request):
         return web.Response(status=401, text="Unauthorized")
@@ -117,9 +131,10 @@ async def handle_vcwho(request):
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_post("/mute",  handle_mute)
-    app.router.add_post("/light", handle_light)
-    app.router.add_get("/vcwho",  handle_vcwho)
+    app.router.add_post("/mute",   handle_mute)
+    app.router.add_post("/deafen", handle_deafen)
+    app.router.add_post("/light",  handle_light)
+    app.router.add_get("/vcwho",   handle_vcwho)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
