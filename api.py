@@ -244,15 +244,20 @@ def setup(bot, secret: str, port: int):
 
     # ── Server ────────────────────────────────────────────────────────────────
 
+    async def handle_health(request):
+        """GET /health — Koyeb health check, no auth needed."""
+        return web.Response(text="ok")
+
     async def start():
         app = web.Application()
-        app.router.add_get("/status", handle_status)
-        app.router.add_get("/vcwho",  handle_vcwho)
-        app.router.add_post("/mute",                handle_mute)
-        app.router.add_post("/deafen",              handle_deafen)
-        app.router.add_post("/nugahlive/action",        handle_nugahlive_action)
-        app.router.add_post("/nugahlive/disconnect",    handle_disconnect)
-        app.router.add_post("/light",               handle_light)
+        app.router.add_get("/health",  handle_health)
+        app.router.add_get("/status",  handle_status)
+        app.router.add_get("/vcwho",   handle_vcwho)
+        app.router.add_post("/mute",                 handle_mute)
+        app.router.add_post("/deafen",               handle_deafen)
+        app.router.add_post("/nugahlive/action",     handle_nugahlive_action)
+        app.router.add_post("/nugahlive/disconnect", handle_disconnect)
+        app.router.add_post("/light",                handle_light)
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", port).start()
