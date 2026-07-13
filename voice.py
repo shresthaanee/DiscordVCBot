@@ -1,20 +1,17 @@
 import time
+import datetime
 from collections import defaultdict
 from discord.ext import tasks
 from light import light_on, light_off
 
-# user_id → timestamp when they joined current session
-join_times = {}
-
-# user_id → total seconds spent in voice today
-# { user_id: {"name": str, "total": float} }
+join_times   = {}
 daily_totals = defaultdict(lambda: {"name": "", "total": 0.0})
 
 
 def format_duration(seconds: float) -> str:
     seconds = int(seconds)
-    h, rem  = divmod(seconds, 3600)
-    m, s    = divmod(rem, 60)
+    h, rem = divmod(seconds, 3600)
+    m, s   = divmod(rem, 60)
     if h:
         return f"{h}h {m}m {s}s"
     if m:
@@ -23,11 +20,12 @@ def format_duration(seconds: float) -> str:
 
 
 def anyone_in_voice(bot):
-    for guild in bot.guilds:
-        for vc in guild.voice_channels:
-            if any(not m.bot for m in vc.members):
-                return True
-    return False
+    return any(
+        not m.bot
+        for guild in bot.guilds
+        for vc in guild.voice_channels
+        for m in vc.members
+    )
 
 
 def find_member_in_voice(bot, user_id: int):
@@ -39,8 +37,7 @@ def find_member_in_voice(bot, user_id: int):
     return None
 
 
-def get_session_duration(user_id: int) -> float | None:
-    """Return how long (seconds) a user has been in voice this session."""
+def get_session_duration(user_id: int):
     if user_id not in join_times:
         return None
     return time.time() - join_times[user_id]
@@ -52,46 +49,42 @@ def _record_join(member):
 
 
 def _record_leave(member) -> float:
-    """Remove join record, accumulate to daily total, return session seconds."""
     if member.id not in join_times:
         return 0.0
     duration = time.time() - join_times.pop(member.id)
-    daily_totals[member.id]["name"]  = member.display_name
+    daily_totals[member.id]["name"]   = member.display_name
     daily_totals[member.id]["total"] += duration
     return duration
 
 
 def setup(bot, log_channel_id: int):
 
-    @tasks.loop(time=__import__("datetime").time(hour=18, minute=15))
+    @tasks.loop(time=datetime.time(hour=18, minute=15))  # 00:00 Nepal time (UTC+5:45)
     async def post_daily_summary():
         log_channel = bot.get_channel(log_channel_id)
         if log_channel is None:
             return
 
-        # Flush anyone still in voice into the totals
+        # Flush anyone still in voice
         for uid, joined_at in list(join_times.items()):
-            duration = time.time() - joined_at
-            daily_totals[uid]["total"] += duration
-            join_times[uid] = time.time()  # reset so they keep accumulating tomorrow
+            daily_totals[uid]["total"] += time.time() - joined_at
+            join_times[uid] = time.time()
 
-        if not daily_totals:
+        if not any(d["total"] > 0 for d in daily_totals.values()):
             await log_channel.send("📋 **Daily Summary** — Nobody was in voice today.")
+            daily_totals.clear()
             return
 
-        lines = ["📋 **Daily Voice Summary**", "─" * 30]
+        lines        = ["📋 **Daily Voice Summary**", "─" * 30]
         sorted_users = sorted(daily_totals.items(), key=lambda x: x[1]["total"], reverse=True)
-        for uid, data in sorted_users:
+        for _, data in sorted_users:
             if data["total"] > 0:
                 lines.append(f"👤 **{data['name']}** — {format_duration(data['total'])}")
 
-        lines.append("─" * 30)
         total_all = sum(d["total"] for d in daily_totals.values())
-        lines.append(f"⏱️ Total voice time today: **{format_duration(total_all)}**")
+        lines += ["─" * 30, f"⏱️ Total voice time today: **{format_duration(total_all)}**"]
 
         await log_channel.send("\n".join(lines))
-
-        # Reset for next day
         daily_totals.clear()
 
     @bot.event
@@ -130,7 +123,6 @@ def setup(bot, log_channel_id: int):
             )
             if not anyone_in_voice(bot):
                 await light_off()
-                await log_channel.send("💡 No one left in voice — light turned off.")
 
         elif switched:
             await log_channel.send(
